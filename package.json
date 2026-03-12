@@ -7,7 +7,9 @@
     "build": "tsc --noEmit && cross-env INPUT=src/weather-app/main/weather.html vite build && cross-env INPUT=src/weather-app/nearby/nearby.html vite build",
     "serve": "cross-env NODE_ENV=production tsx src/server/server.ts",
     "dev": "tsx watch src/server/server.ts",
-    "inspect": "npx @modelcontextprotocol/inspector@latest http://localhost:3001/mcp"
+    "inspect": "npx @modelcontextprotocol/inspector@latest http://localhost:3001/mcp",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [],
   "author": "",
@@ -33,6 +35,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
-    "vite-plugin-singlefile": "^2.3.0"
+    "vite-plugin-singlefile": "^2.3.0",
+    "vitest": "^4.1.0"
   }
 }

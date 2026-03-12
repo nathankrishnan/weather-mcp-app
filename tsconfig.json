@@ -1,5 +1,6 @@
 {
     "compilerOptions": {
+        "baseUrl": ".",
         "target": "ESNext",
         "lib": [
             "ESNext",
@@ -16,6 +17,9 @@
         "strict": true,
         "skipLibCheck": true,
         "paths": {
+            "@server/*": [
+                "./src/server/*"
+            ],
             "@shared/*": [
                 "./src/shared/*"
             ]
@@ -23,6 +27,8 @@
     },
     "include": [
         "src",
-        "vite.config.ts"
+        "tests",
+        "vite.config.ts",
+        "vitest.config.ts"
     ]
 }

@@ -10,4 +10,3 @@ export { RESOURCE_MIME_TYPE };
 // resources.ts registers these as the addresses the host can request
 export const MAIN_RESOURCE_URI = "weather://main";
 export const NEARBY_RESOURCE_URI = "weather://nearby";
-

@@ -8,10 +8,7 @@ import { geocodeCity, type GeocodedLocation } from "./geocoding";
 import { getCurrentWeather, getHourlyForecast, getWeeklyForecast } from "./nws";
 import { getNearbyCities } from "./nearby-cities";
 import { MAIN_RESOURCE_URI, NEARBY_RESOURCE_URI } from "./constants";
-import type {
-  NearbyCity as NearbyWeatherCity,
-  WeatherError,
-} from "@shared/types";
+import type { NearbyCity as NearbyWeatherCity, WeatherError } from "@shared/types";
 
 // --- Shared input schema ---
 
@@ -162,10 +159,7 @@ export function registerTools(server: McpServer): void {
 
         const days = forecastResult.data;
         const summary = days
-          .map(
-            (d) =>
-              `${d.day}: High ${d.high}°F / Low ${d.low}°F, ${d.condition}`,
-          )
+          .map((d) => `${d.day}: High ${d.high}°F / Low ${d.low}°F, ${d.condition}`)
           .join("; ");
 
         return {
@@ -242,9 +236,7 @@ export function registerTools(server: McpServer): void {
         });
 
         const results = await Promise.all(weatherPromises);
-        const cities = results.filter(
-          (value): value is NearbyWeatherCity => value !== null,
-        );
+        const cities = results.filter((value): value is NearbyWeatherCity => value !== null);
 
         if (cities.length === 0) {
           return {

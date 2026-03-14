@@ -263,9 +263,7 @@ describe("registerTools", () => {
       structuredContent: { nearby: { cities: unknown[] } };
     };
 
-    expect(result.content[0]?.text).toContain(
-      "Could not fetch nearby weather right now",
-    );
+    expect(result.content[0]?.text).toContain("Could not fetch nearby weather right now");
     expect(result.structuredContent.nearby.cities).toEqual([]);
     expect(getCurrentWeatherMock).toHaveBeenCalledTimes(2);
   });

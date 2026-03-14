@@ -8,7 +8,10 @@ import { geocodeCity, type GeocodedLocation } from "./geocoding";
 import { getCurrentWeather, getHourlyForecast, getWeeklyForecast } from "./nws";
 import { getNearbyCities } from "./nearby-cities";
 import { MAIN_RESOURCE_URI, NEARBY_RESOURCE_URI } from "./constants";
-import type { NearbyCity as NearbyWeatherCity } from "@shared/types";
+import type {
+  NearbyCity as NearbyWeatherCity,
+  WeatherError,
+} from "@shared/types";
 
 // --- Shared input schema ---
 
@@ -23,6 +26,31 @@ const citySchema = {
         "Do not include country name. US locations only.",
     ),
 };
+
+// --- Shared helper: standardized tool error payload ---
+
+type ToolErrorResponse = {
+  content: Array<{ type: "text"; text: string }>;
+  structuredContent: { error: WeatherError };
+};
+
+function toToolError(error: WeatherError): ToolErrorResponse {
+  return {
+    content: [{ type: "text", text: error.message }],
+    structuredContent: { error },
+  };
+}
+
+// --- Shared helper: geocode city before running tool-specific logic ---
+
+async function withGeocodedCity<T>(
+  city: string,
+  run: (location: GeocodedLocation) => Promise<T>,
+): Promise<T | ToolErrorResponse> {
+  const geoResult = await geocodeCity(city);
+  if (!geoResult.ok) return toToolError(geoResult.error);
+  return run(geoResult.location);
+}
 
 // --- Tools ---
 
@@ -45,49 +73,25 @@ export function registerTools(server: McpServer): void {
         },
       },
     },
-    async ({ city }) => {
-      // Geocode first
-      const geoResult = await geocodeCity(city);
-      if (!geoResult.ok) {
+    async ({ city }) =>
+      withGeocodedCity(city, async (location) => {
+        const weatherResult = await getCurrentWeather(location);
+        if (!weatherResult.ok) return toToolError(weatherResult.error);
+
+        const w = weatherResult.data;
         return {
           content: [
             {
               type: "text",
-              text: geoResult.error.message,
+              text:
+                `Current weather in ${w.city}: ${w.temperature}°F, ${w.condition}. ` +
+                `Wind ${w.windSpeed} ${w.windDirection}. Humidity ${w.humidity}%. ` +
+                `Precipitation chance ${w.precipChance}%.`,
             },
           ],
-          structuredContent: { error: geoResult.error },
+          structuredContent: { current: w },
         };
-      }
-
-      // Fetch weather
-      const weatherResult = await getCurrentWeather(geoResult.location);
-      if (!weatherResult.ok) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: weatherResult.error.message,
-            },
-          ],
-          structuredContent: { error: weatherResult.error },
-        };
-      }
-
-      const w = weatherResult.data;
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              `Current weather in ${w.city}: ${w.temperature}°F, ${w.condition}. ` +
-              `Wind ${w.windSpeed} ${w.windDirection}. Humidity ${w.humidity}%. ` +
-              `Precipitation chance ${w.precipChance}%.`,
-          },
-        ],
-        structuredContent: { current: w },
-      };
-    },
+      }),
   );
 
   // get-hourly-forecast
@@ -108,47 +112,30 @@ export function registerTools(server: McpServer): void {
         },
       },
     },
-    async ({ city }) => {
-      const geoResult = await geocodeCity(city);
-      if (!geoResult.ok) {
+    async ({ city }) =>
+      withGeocodedCity(city, async (location) => {
+        const forecastResult = await getHourlyForecast(location);
+        if (!forecastResult.ok) return toToolError(forecastResult.error);
+
+        const hours = forecastResult.data;
+        const summary = hours
+          .slice(0, 6)
+          .map((h) => `${h.time}: ${h.temperature}°F, ${h.condition}`)
+          .join("; ");
+
         return {
           content: [
             {
               type: "text",
-              text: geoResult.error.message,
+              text: `Hourly forecast for ${location.displayName}: ${summary}`,
             },
           ],
-          structuredContent: { error: geoResult.error },
-        };
-      }
-
-      const forecastResult = await getHourlyForecast(geoResult.location);
-      if (!forecastResult.ok) {
-        return {
-          content: [{ type: "text", text: forecastResult.error.message }],
-          structuredContent: { error: forecastResult.error },
-        };
-      }
-
-      const hours = forecastResult.data;
-      const summary = hours
-        .slice(0, 6)
-        .map((h) => `${h.time}: ${h.temperature}°F, ${h.condition}`)
-        .join("; ");
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Hourly forecast for ${geoResult.location.displayName}: ${summary}`,
+          structuredContent: {
+            hourly: hours,
+            city: location.displayName,
           },
-        ],
-        structuredContent: {
-          hourly: hours,
-          city: geoResult.location.displayName,
-        },
-      };
-    },
+        };
+      }),
   );
 
   // get-weekly-forecast
@@ -168,43 +155,32 @@ export function registerTools(server: McpServer): void {
         },
       },
     },
-    async ({ city }) => {
-      const geoResult = await geocodeCity(city);
-      if (!geoResult.ok) {
+    async ({ city }) =>
+      withGeocodedCity(city, async (location) => {
+        const forecastResult = await getWeeklyForecast(location);
+        if (!forecastResult.ok) return toToolError(forecastResult.error);
+
+        const days = forecastResult.data;
+        const summary = days
+          .map(
+            (d) =>
+              `${d.day}: High ${d.high}°F / Low ${d.low}°F, ${d.condition}`,
+          )
+          .join("; ");
+
         return {
-          content: [{ type: "text", text: geoResult.error.message }],
-          structuredContent: { error: geoResult.error },
-        };
-      }
-
-      const forecastResult = await getWeeklyForecast(geoResult.location);
-      if (!forecastResult.ok) {
-        return {
-          content: [{ type: "text", text: forecastResult.error.message }],
-          structuredContent: { error: forecastResult.error },
-        };
-      }
-
-      const days = forecastResult.data;
-      const summary = days
-        .map(
-          (d) => `${d.day}: High ${d.high}°F / Low ${d.low}°F, ${d.condition}`,
-        )
-        .join("; ");
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `7-day forecast for ${geoResult.location.displayName}: ${summary}`,
+          content: [
+            {
+              type: "text",
+              text: `7-day forecast for ${location.displayName}: ${summary}`,
+            },
+          ],
+          structuredContent: {
+            weekly: days,
+            city: location.displayName,
           },
-        ],
-        structuredContent: {
-          weekly: days,
-          city: geoResult.location.displayName,
-        },
-      };
-    },
+        };
+      }),
   );
 
   // get-nearby-weather
@@ -226,92 +202,85 @@ export function registerTools(server: McpServer): void {
         },
       },
     },
-    async ({ city }) => {
-      const geoResult = await geocodeCity(city);
-      if (!geoResult.ok) {
-        return {
-          content: [{ type: "text", text: geoResult.error.message }],
-          structuredContent: { error: geoResult.error },
-        };
-      }
+    async ({ city }) =>
+      withGeocodedCity(city, async (location) => {
+        const nearbyCities = getNearbyCities(location.displayName);
+        if (nearbyCities.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No nearby city data is available for ${location.displayName} yet.`,
+              },
+            ],
+            structuredContent: {
+              nearby: {
+                origin: location.displayName,
+                cities: [],
+              },
+            },
+          };
+        }
 
-      const nearbyCities = getNearbyCities(geoResult.location.displayName);
-      if (nearbyCities.length === 0) {
+        // Fetch current weather for each nearby city in parallel
+        const weatherPromises = nearbyCities.map(async (nearbyCity) => {
+          const cityLocation: GeocodedLocation = {
+            lat: nearbyCity.lat,
+            lon: nearbyCity.lon,
+            displayName: `${nearbyCity.name}, ${nearbyCity.state}`,
+          };
+
+          const result = await getCurrentWeather(cityLocation);
+          if (!result.ok) return null;
+          return {
+            name: nearbyCity.name,
+            distance: nearbyCity.distance,
+            temperature: result.data.temperature,
+            condition: result.data.condition,
+            icon: result.data.icon,
+          };
+        });
+
+        const results = await Promise.all(weatherPromises);
+        const cities = results.filter(
+          (value): value is NearbyWeatherCity => value !== null,
+        );
+
+        if (cities.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Could not fetch nearby weather right now for ${location.displayName}.`,
+              },
+            ],
+            structuredContent: {
+              nearby: {
+                origin: location.displayName,
+                cities: [],
+              },
+            },
+          };
+        }
+
+        const summary = cities
+          .map((c) => `${c.name}: ${c.temperature}°F, ${c.condition}`)
+          .join("; ");
+
         return {
           content: [
             {
               type: "text",
-              text: `No nearby city data is available for ${geoResult.location.displayName} yet.`,
+              text: `Nearby weather around ${location.displayName}: ${summary}`,
             },
           ],
           structuredContent: {
             nearby: {
-              origin: geoResult.location.displayName,
-              cities: [],
+              origin: location.displayName,
+              cities,
             },
           },
         };
-      }
-
-      // Fetch current weather for each nearby city in parallel
-      const weatherPromises = nearbyCities.map(async (nearbyCity) => {
-        const cityLocation: GeocodedLocation = {
-          lat: nearbyCity.lat,
-          lon: nearbyCity.lon,
-          displayName: `${nearbyCity.name}, ${nearbyCity.state}`,
-        };
-
-        const result = await getCurrentWeather(cityLocation);
-        if (!result.ok) return null;
-        return {
-          name: nearbyCity.name,
-          distance: nearbyCity.distance,
-          temperature: result.data.temperature,
-          condition: result.data.condition,
-          icon: result.data.icon,
-        };
-      });
-
-      const results = await Promise.all(weatherPromises);
-      const cities = results.filter(
-        (value): value is NearbyWeatherCity => value !== null,
-      );
-
-      if (cities.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Could not fetch nearby weather right now for ${geoResult.location.displayName}.`,
-            },
-          ],
-          structuredContent: {
-            nearby: {
-              origin: geoResult.location.displayName,
-              cities: [],
-            },
-          },
-        };
-      }
-
-      const summary = cities
-        .map((c) => `${c.name}: ${c.temperature}°F, ${c.condition}`)
-        .join("; ");
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Nearby weather around ${geoResult.location.displayName}: ${summary}`,
-          },
-        ],
-        structuredContent: {
-          nearby: {
-            origin: geoResult.location.displayName,
-            cities,
-          },
-        },
-      };
-    },
+      }),
   );
 }

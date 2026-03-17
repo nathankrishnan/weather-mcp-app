@@ -51,6 +51,42 @@ function hasWeeklyForecast(data: unknown): data is WeeklyForecastResult {
   return isObject(data) && "weekly" in data && "city" in data;
 }
 
+// Build the next state from a current-conditions payload
+// If the city changed, clear hourly/weekly so we do not mix cities in the UI
+function applyCurrentResult(prev: WeatherState, current: CurrentWeather): WeatherState {
+  const cityChanged = prev.city !== null && prev.city !== current.city;
+  return {
+    city: current.city,
+    current,
+    hourly: cityChanged ? null : prev.hourly,
+    weekly: cityChanged ? null : prev.weekly,
+  };
+}
+
+// Build the next state from an hourly payload
+// Keep existing current/weekly only when the payload is for the same city
+function applyHourlyResult(prev: WeatherState, city: string, hourly: HourlyPeriod[]): WeatherState {
+  const cityChanged = prev.city !== null && prev.city !== city;
+  return {
+    city,
+    current: cityChanged ? null : prev.current,
+    hourly,
+    weekly: cityChanged ? null : prev.weekly,
+  };
+}
+
+// Build the next state from a weekly payload
+// Clear stale current/hourly data if this weekly forecast is for a new city
+function applyWeeklyResult(prev: WeatherState, city: string, weekly: DailyPeriod[]): WeatherState {
+  const cityChanged = prev.city !== null && prev.city !== city;
+  return {
+    city,
+    current: cityChanged ? null : prev.current,
+    hourly: cityChanged ? null : prev.hourly,
+    weekly,
+  };
+}
+
 export function WeatherApp() {
   // Tab state
   const [activeTab, setActiveTab] = useState<WeatherTab>("current");
@@ -87,48 +123,39 @@ export function WeatherApp() {
         if (hasWeatherError(data)) {
           setError(data.error.message);
           setIsLoadingCurrent(false);
+          setIsLoadingHourly(false);
+          setIsLoadingWeekly(false);
           return;
         }
 
         // Route based on what the server returned
         if (hasCurrentWeather(data)) {
           const { current } = data;
-          setWeather((prev) => {
-            return {
-              city: current.city,
-              current,
-              hourly: prev.hourly,
-              weekly: prev.weekly,
-            };
-          });
+          // A current-weather tool result should move the user to the Current tab.
+          setActiveTab("current");
+          setWeather((prev) => applyCurrentResult(prev, current));
           setIsLoadingCurrent(false);
           setError(null);
         }
 
         if (hasHourlyForecast(data)) {
-          const { hourly } = data;
-          setWeather((prev) => {
-            return {
-              city: prev.city,
-              current: prev.current,
-              hourly,
-              weekly: prev.weekly,
-            };
-          });
+          const { city, hourly } = data;
+          // If the AI asked for hourly first, show that tab immediately
+          setActiveTab("hourly");
+          setWeather((prev) => applyHourlyResult(prev, city, hourly));
+          setIsLoadingCurrent(false);
           setIsLoadingHourly(false);
+          setError(null);
         }
 
         if (hasWeeklyForecast(data)) {
-          const { weekly } = data;
-          setWeather((prev) => {
-            return {
-              city: prev.city,
-              current: prev.current,
-              hourly: prev.hourly,
-              weekly,
-            };
-          });
+          const { city, weekly } = data;
+          // Weekly tool results should also drive the visible tab
+          setActiveTab("weekly");
+          setWeather((prev) => applyWeeklyResult(prev, city, weekly));
+          setIsLoadingCurrent(false);
           setIsLoadingWeekly(false);
+          setError(null);
         }
       };
 
@@ -161,15 +188,8 @@ export function WeatherApp() {
 
           const data = result.structuredContent;
           if (hasHourlyForecast(data)) {
-            const { hourly } = data;
-            setWeather((prev) => {
-              return {
-                city: prev.city,
-                current: prev.current,
-                hourly,
-                weekly: prev.weekly,
-              };
-            });
+            const { city, hourly } = data;
+            setWeather((prev) => applyHourlyResult(prev, city, hourly));
           }
         } catch {
           // Show empty state
@@ -188,15 +208,8 @@ export function WeatherApp() {
 
           const data = result.structuredContent;
           if (hasWeeklyForecast(data)) {
-            const { weekly } = data;
-            setWeather((prev) => {
-              return {
-                city: prev.city,
-                current: prev.current,
-                hourly: prev.hourly,
-                weekly,
-              };
-            });
+            const { city, weekly } = data;
+            setWeather((prev) => applyWeeklyResult(prev, city, weekly));
           }
         } catch {
           // Non-critical
@@ -209,20 +222,22 @@ export function WeatherApp() {
   );
 
   // --- Render guards ---
+  // Allow the app to render if any tab has data, even when current conditions
+  // have not been fetched yet. This is what makes hourly-first/weekly-first work
+  const hasWeatherData =
+    weather.current !== null || weather.hourly !== null || weather.weekly !== null;
+
   if (appError) {
     return <FullScreenMessage message={appError.message} isError />;
   }
 
-  if (!isConnected || (isLoadingCurrent && !weather.current)) {
+  if (!isConnected || (!hasWeatherData && isLoadingCurrent)) {
     return <FullScreenMessage message="Loading weather..." />;
   }
 
   if (error) {
     return <FullScreenMessage message={error} isError />;
   }
-
-  // weather.current is guaranteed non-null past this point
-  const current = weather.current!;
 
   // --- Main render ---
   return (
@@ -231,9 +246,12 @@ export function WeatherApp() {
       <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
 
       {/* Tab content — conditionally render based on active tab */}
-      {activeTab === "current" && (
-        <CurrentConditions current={current} isRefreshing={isLoadingCurrent} />
-      )}
+      {activeTab === "current" &&
+        (weather.current ? (
+          <CurrentConditions current={weather.current} isRefreshing={isLoadingCurrent} />
+        ) : (
+          <FullScreenMessage message="Current conditions not loaded yet." />
+        ))}
 
       {activeTab === "hourly" && (
         <HourlyForecast hours={weather.hourly ?? []} isLoading={isLoadingHourly} />

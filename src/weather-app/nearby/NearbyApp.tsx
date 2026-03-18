@@ -1,10 +1,19 @@
 // Displays nearby city weather comparison
-// button clicks call callServerTool with different city arguments
+// Clicking a city card calls get-current-weather — if the host supports resource
+// switching, it will transition to WeatherApp. Otherwise, a compact summary bar
+// appears above the grid as a fallback.
 
 import { useCallback, useState, type CSSProperties } from "react";
 import { useApp, useHostStyles } from "@modelcontextprotocol/ext-apps/react";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { NearbyCity, NearbyWeather, NearbyWeatherResult, WeatherError } from "@shared/types";
+import type {
+  CurrentWeather,
+  NearbyCity,
+  NearbyWeather,
+  NearbyWeatherResult,
+  WeatherError,
+  CurrentWeatherResult,
+} from "@shared/types";
 import { ICON_MAP } from "@shared/icons";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -19,21 +28,38 @@ function hasNearbyWeather(data: unknown): data is NearbyWeatherResult {
   return isObject(data) && "nearby" in data;
 }
 
+function hasCurrentWeather(data: unknown): data is CurrentWeatherResult {
+  return isObject(data) && "current" in data;
+}
+
 export function NearbyApp() {
   const [nearby, setNearby] = useState<NearbyWeather | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Tracks which city's weather is being refreshed by city name
-  // This lets us show a loading state on just that one card without
-  // disabling the whole UI
+  // Fallback summary: populated when the host did not switch to WeatherApp
+  // (if the host did switch, NearbyApp is hidden and this state is irrelevant)
+  const [selectedCity, setSelectedCity] = useState<CurrentWeather | null>(null);
+
+  // Tracks which city card is in a loading state
   const [refreshingCity, setRefreshingCity] = useState<string | null>(null);
 
-  const applyNearbyResult = useCallback((nextNearby: NearbyWeather) => {
-    setNearby(nextNearby);
-    setIsLoading(false);
-    setError(null);
-  }, []);
+  // Shared result handler for ontoolresult
+  function applyToolResult(result: CallToolResult): void {
+    const data = result.structuredContent;
+
+    if (hasWeatherError(data)) {
+      setError(data.error.message);
+      setIsLoading(false);
+      return;
+    }
+
+    if (hasNearbyWeather(data)) {
+      setNearby(data.nearby);
+      setIsLoading(false);
+      setError(null);
+    }
+  }
 
   const {
     app,
@@ -44,17 +70,7 @@ export function NearbyApp() {
     capabilities: {},
     onAppCreated: (app) => {
       app.ontoolresult = (result: CallToolResult) => {
-        const data = result.structuredContent;
-
-        if (hasWeatherError(data)) {
-          setError(data.error.message);
-          setIsLoading(false);
-          return;
-        }
-
-        if (hasNearbyWeather(data)) {
-          applyNearbyResult(data.nearby);
-        }
+        applyToolResult(result);
       };
 
       app.onteardown = async () => ({});
@@ -64,51 +80,38 @@ export function NearbyApp() {
   useHostStyles(app, app?.getHostContext());
 
   // --- Handle city card click ---
-  // When the user clicks a city card, fetch nearby weather centered on that city
-  // This replaces the entire nearby view with the new city's nearby cities
-  // This is callServerTool with arguments — the same tool, different city
+  // Calls get-current-weather for the clicked city.
+  // If the host supports resource switching (e.g. Claude), it will automatically
+  // display WeatherApp with the result. If not (e.g. MCP Inspector), we receive
+  // the result here and show an inline summary bar above the grid.
 
   const handleCityClick = useCallback(
     async (cityName: string) => {
       if (!app || refreshingCity) return;
 
       setRefreshingCity(cityName);
+      setSelectedCity(null);
 
       try {
         const result = await app.callServerTool({
-          name: "get-nearby-weather",
+          name: "get-current-weather",
           arguments: { city: cityName },
         });
 
         const data = result.structuredContent;
         if (hasWeatherError(data)) {
           setError(data.error.message);
-          setIsLoading(false);
-          return;
-        }
-
-        if (hasNearbyWeather(data)) {
-          applyNearbyResult(data.nearby);
-
-          // Tell the AI the context changed
-          await app
-            .updateModelContext({
-              content: [
-                {
-                  type: "text",
-                  text: `User is now viewing nearby weather around ${cityName}.`,
-                },
-              ],
-            })
-            .catch(() => {});
+        } else if (hasCurrentWeather(data)) {
+          // Always set — only visible if the host did not switch to WeatherApp
+          setSelectedCity(data.current);
         }
       } catch {
-        // Non-critical
+        setError("Failed to load city weather. Please try again.");
       } finally {
         setRefreshingCity(null);
       }
     },
-    [app, applyNearbyResult, refreshingCity],
+    [app, refreshingCity],
   );
 
   // --- Render guards ---
@@ -132,6 +135,19 @@ export function NearbyApp() {
   return (
     <main style={styles.container}>
       <p style={styles.title}>Near {data.origin}</p>
+
+      {/* Fallback summary bar — visible only when the host did not switch to WeatherApp */}
+      {selectedCity && (
+        <div style={styles.summaryBar}>
+          <span style={styles.summaryText}>
+            {selectedCity.city} — {selectedCity.temperature}°F, {selectedCity.condition}
+          </span>
+          <button style={styles.dismissButton} onClick={() => setSelectedCity(null)}>
+            ×
+          </button>
+        </div>
+      )}
+
       <div style={styles.grid}>
         {data.cities.map((city) => (
           <CityCard
@@ -142,7 +158,7 @@ export function NearbyApp() {
           />
         ))}
       </div>
-      <p style={styles.hint}>Select a city to see its nearby weather</p>
+      <p style={styles.hint}>Select a city to see its current conditions</p>
     </main>
   );
 }
@@ -213,6 +229,29 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: "300",
     color: "var(--color-text-primary)" as string,
     textAlign: "center" as const,
+  },
+  summaryBar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "var(--spacing-sm) var(--spacing-md)" as string,
+    background: "var(--color-surface)" as string,
+    border: "1px solid var(--color-border)" as string,
+    borderRadius: "var(--radius-md)" as string,
+  },
+  summaryText: {
+    fontSize: "var(--font-size-sm)" as string,
+    color: "var(--color-text-primary)" as string,
+  },
+  dismissButton: {
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    fontSize: "var(--font-size-lg)" as string,
+    color: "var(--color-text-secondary)" as string,
+    lineHeight: 1,
+    padding: "0 var(--spacing-xs)" as string,
+    fontFamily: "inherit",
   },
   grid: {
     display: "grid",

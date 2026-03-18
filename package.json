@@ -6,8 +6,9 @@
   "scripts": {
     "build": "tsc --noEmit && cross-env INPUT=src/weather-app/main/weather.html vite build && cross-env INPUT=src/weather-app/nearby/nearby.html vite build",
     "serve": "cross-env NODE_ENV=production tsx src/server/server.ts",
-    "dev": "tsx watch src/server/server.ts",
     "inspect": "npx @modelcontextprotocol/inspector@latest http://localhost:3001/mcp",
+    "dev": "tsx watch src/server/server.ts",
+    "dev:inspect": "concurrently \"npm run dev\" \"npm run inspect\"",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -31,6 +32,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
+    "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",

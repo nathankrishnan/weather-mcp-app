@@ -20,7 +20,7 @@ function createServer(): McpServer {
   return server;
 }
 
-const app = createMcpExpressApp({ host: "localhost" });
+const app = createMcpExpressApp({ host: "0.0.0.0" });
 app.use(cors());
 
 app.all("/mcp", async (req: Request, res: Response) => {

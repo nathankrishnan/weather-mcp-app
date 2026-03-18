@@ -107,6 +107,39 @@ export function WeatherApp() {
   // Error state
   const [error, setError] = useState<string | null>(null);
 
+  // Shared result handler — used by both ontoolresult and handleTabChange
+  function applyToolResult(result: CallToolResult): void {
+    const data = result.structuredContent;
+
+    if (hasWeatherError(data)) {
+      setError(data.error.message);
+      setIsLoadingCurrent(false);
+      setIsLoadingHourly(false);
+      setIsLoadingWeekly(false);
+      return;
+    }
+
+    if (hasCurrentWeather(data)) {
+      setWeather((prev) => applyCurrentResult(prev, data.current));
+      setIsLoadingCurrent(false);
+      setError(null);
+    }
+
+    if (hasHourlyForecast(data)) {
+      setWeather((prev) => applyHourlyResult(prev, data.city, data.hourly));
+      setIsLoadingCurrent(false);
+      setIsLoadingHourly(false);
+      setError(null);
+    }
+
+    if (hasWeeklyForecast(data)) {
+      setWeather((prev) => applyWeeklyResult(prev, data.city, data.weekly));
+      setIsLoadingCurrent(false);
+      setIsLoadingWeekly(false);
+      setError(null);
+    }
+  }
+
   // MCP connection
   const {
     app,
@@ -118,44 +151,13 @@ export function WeatherApp() {
     onAppCreated: (app) => {
       app.ontoolresult = (result: CallToolResult) => {
         const data = result.structuredContent;
+        applyToolResult(result);
 
-        // Handle error from server
-        if (hasWeatherError(data)) {
-          setError(data.error.message);
-          setIsLoadingCurrent(false);
-          setIsLoadingHourly(false);
-          setIsLoadingWeekly(false);
-          return;
-        }
-
-        // Route based on what the server returned
-        if (hasCurrentWeather(data)) {
-          const { current } = data;
-          // A current-weather tool result should move the user to the Current tab.
-          setActiveTab("current");
-          setWeather((prev) => applyCurrentResult(prev, current));
-          setIsLoadingCurrent(false);
-          setError(null);
-        }
-
-        if (hasHourlyForecast(data)) {
-          const { city, hourly } = data;
-          // If the AI asked for hourly first, show that tab immediately
-          setActiveTab("hourly");
-          setWeather((prev) => applyHourlyResult(prev, city, hourly));
-          setIsLoadingCurrent(false);
-          setIsLoadingHourly(false);
-          setError(null);
-        }
-
-        if (hasWeeklyForecast(data)) {
-          const { city, weekly } = data;
-          // Weekly tool results should also drive the visible tab
-          setActiveTab("weekly");
-          setWeather((prev) => applyWeeklyResult(prev, city, weekly));
-          setIsLoadingCurrent(false);
-          setIsLoadingWeekly(false);
-          setError(null);
+        // Drive the visible tab to match what the AI returned
+        if (!hasWeatherError(data)) {
+          if (hasCurrentWeather(data)) setActiveTab("current");
+          if (hasHourlyForecast(data)) setActiveTab("hourly");
+          if (hasWeeklyForecast(data)) setActiveTab("weekly");
         }
       };
 
@@ -179,20 +181,14 @@ export function WeatherApp() {
 
       if (tab === "hourly" && weather.hourly === null) {
         setIsLoadingHourly(true);
-
         try {
           const result = await app.callServerTool({
             name: "get-hourly-forecast",
             arguments: { city: weather.city },
           });
-
-          const data = result.structuredContent;
-          if (hasHourlyForecast(data)) {
-            const { city, hourly } = data;
-            setWeather((prev) => applyHourlyResult(prev, city, hourly));
-          }
+          applyToolResult(result);
         } catch {
-          // Show empty state
+          setError("Failed to load hourly forecast. Please try again.");
         } finally {
           setIsLoadingHourly(false);
         }
@@ -205,14 +201,9 @@ export function WeatherApp() {
             name: "get-weekly-forecast",
             arguments: { city: weather.city },
           });
-
-          const data = result.structuredContent;
-          if (hasWeeklyForecast(data)) {
-            const { city, weekly } = data;
-            setWeather((prev) => applyWeeklyResult(prev, city, weekly));
-          }
+          applyToolResult(result);
         } catch {
-          // Non-critical
+          setError("Failed to load weekly forecast. Please try again.");
         } finally {
           setIsLoadingWeekly(false);
         }

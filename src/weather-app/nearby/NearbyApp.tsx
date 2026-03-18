@@ -142,7 +142,7 @@ export function NearbyApp() {
           />
         ))}
       </div>
-      <p style={styles.hint}>Tap a city to see its nearby weather</p>
+      <p style={styles.hint}>Select a city to see its nearby weather</p>
     </main>
   );
 }

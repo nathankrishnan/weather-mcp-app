@@ -9,9 +9,11 @@ import { MAIN_RESOURCE_URI, NEARBY_RESOURCE_URI, RESOURCE_MIME_TYPE } from "./co
 
 // Helper: read a compiled HTML file from dist/
 function readHtml(filename: string): string {
+  const filePath = join(__dirname, "../../dist", filename);
   try {
-    return readFileSync(join(__dirname, "../../dist", filename), "utf-8");
-  } catch {
+    return readFileSync(filePath, "utf-8");
+  } catch (error) {
+    console.error(`Failed to read app resource HTML at ${filePath}:`, error);
     return `<html><body><p>Weather app is temporarily unavailable. Please try again in a moment.</p></body></html>`;
   }
 }
@@ -31,7 +33,7 @@ export function registerResources(server: McpServer): void {
         {
           uri: MAIN_RESOURCE_URI,
           mimeType: RESOURCE_MIME_TYPE,
-          text: readHtml("weather.html"),
+          text: readHtml("src/weather-app/main/weather.html"),
         },
       ],
     }),
@@ -50,7 +52,7 @@ export function registerResources(server: McpServer): void {
         {
           uri: NEARBY_RESOURCE_URI,
           mimeType: RESOURCE_MIME_TYPE,
-          text: readHtml("nearby.html"),
+          text: readHtml("src/weather-app/nearby/nearby.html"),
         },
       ],
     }),

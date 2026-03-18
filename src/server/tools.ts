@@ -18,9 +18,9 @@ const citySchema = {
     .trim()
     .min(2, "City name is required and must be at least 2 characters.")
     .describe(
-      "US city name, optionally with state abbreviation. " +
-        "Examples: 'Seattle', 'Seattle, WA', 'New York', 'Austin, TX'. " +
-        "Do not include country name. US locations only.",
+      "US city name only, without state or country. " +
+        "Examples: 'Seattle', 'New York', 'Austin'. " +
+        "US locations only.",
     ),
 };
 

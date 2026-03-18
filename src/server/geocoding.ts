@@ -34,7 +34,10 @@ interface OpenMeteoGeoResponse {
 
 export async function geocodeCity(city: string): Promise<GeoResult> {
   const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
-  url.searchParams.set("name", city);
+  // Open-Meteo only matches bare city names
+  // strip any ", State" suffix if present
+  const cityName = city.split(",")[0].trim();
+  url.searchParams.set("name", cityName);
   url.searchParams.set("count", "1");
   url.searchParams.set("language", "en");
   url.searchParams.set("format", "json");

@@ -289,15 +289,15 @@ export async function getWeeklyForecast(
 
   const periods = forecastResult.data.properties.periods;
 
-  // NWS returns alternating day/night periods
-  // We pair them to get high/low
+  // NWS returns alternating day/night periods, but may start with a night
+  // period when queried in the evening. Find the first daytime period so
+  // the i += 2 step always lands on day periods, not night ones.
+  const startIdx = periods.findIndex((p) => p.isDaytime);
   const daily: DailyPeriod[] = [];
 
-  for (let i = 0; i < periods.length - 1 && daily.length < 7; i += 2) {
+  for (let i = startIdx; startIdx !== -1 && i < periods.length - 1 && daily.length < 7; i += 2) {
     const day = periods[i];
     const night = periods[i + 1];
-
-    if (!day.isDaytime) continue;
 
     daily.push({
       day: day.name === "Today" ? "Today" : day.name,

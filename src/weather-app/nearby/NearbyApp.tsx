@@ -1,11 +1,19 @@
 // Displays nearby city weather comparison
-// button clicks call callServerTool with different city arguments
+// button clicks call get-current-weather and show inline current conditions
 
 import { useCallback, useState, type CSSProperties } from "react";
 import { useApp, useHostStyles } from "@modelcontextprotocol/ext-apps/react";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { NearbyCity, NearbyWeather, NearbyWeatherResult, WeatherError } from "@shared/types";
+import type {
+  CurrentWeather,
+  NearbyCity,
+  NearbyWeather,
+  NearbyWeatherResult,
+  WeatherError,
+  CurrentWeatherResult,
+} from "@shared/types";
 import { ICON_MAP } from "@shared/icons";
+import { CurrentConditions } from "../main/components/CurrentConditions";
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -19,21 +27,38 @@ function hasNearbyWeather(data: unknown): data is NearbyWeatherResult {
   return isObject(data) && "nearby" in data;
 }
 
+function hasCurrentWeather(data: unknown): data is CurrentWeatherResult {
+  return isObject(data) && "current" in data;
+}
+
 export function NearbyApp() {
   const [nearby, setNearby] = useState<NearbyWeather | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Tracks which city's weather is being refreshed by city name
-  // This lets us show a loading state on just that one card without
-  // disabling the whole UI
+  // Selected city state — set when a city card is clicked
+  const [selectedCity, setSelectedCity] = useState<CurrentWeather | null>(null);
+  const [isLoadingSelected, setIsLoadingSelected] = useState(false);
+
+  // Tracks which city's card is in a loading state
   const [refreshingCity, setRefreshingCity] = useState<string | null>(null);
 
-  const applyNearbyResult = useCallback((nextNearby: NearbyWeather) => {
-    setNearby(nextNearby);
-    setIsLoading(false);
-    setError(null);
-  }, []);
+  // Shared result handler for ontoolresult
+  function applyToolResult(result: CallToolResult): void {
+    const data = result.structuredContent;
+
+    if (hasWeatherError(data)) {
+      setError(data.error.message);
+      setIsLoading(false);
+      return;
+    }
+
+    if (hasNearbyWeather(data)) {
+      setNearby(data.nearby);
+      setIsLoading(false);
+      setError(null);
+    }
+  }
 
   const {
     app,
@@ -44,17 +69,7 @@ export function NearbyApp() {
     capabilities: {},
     onAppCreated: (app) => {
       app.ontoolresult = (result: CallToolResult) => {
-        const data = result.structuredContent;
-
-        if (hasWeatherError(data)) {
-          setError(data.error.message);
-          setIsLoading(false);
-          return;
-        }
-
-        if (hasNearbyWeather(data)) {
-          applyNearbyResult(data.nearby);
-        }
+        applyToolResult(result);
       };
 
       app.onteardown = async () => ({});
@@ -64,51 +79,36 @@ export function NearbyApp() {
   useHostStyles(app, app?.getHostContext());
 
   // --- Handle city card click ---
-  // When the user clicks a city card, fetch nearby weather centered on that city
-  // This replaces the entire nearby view with the new city's nearby cities
-  // This is callServerTool with arguments — the same tool, different city
+  // Fetches get-current-weather for the clicked city and shows inline conditions
+  // with a ← Back button to return to the nearby grid
 
   const handleCityClick = useCallback(
     async (cityName: string) => {
       if (!app || refreshingCity) return;
 
       setRefreshingCity(cityName);
+      setIsLoadingSelected(true);
 
       try {
         const result = await app.callServerTool({
-          name: "get-nearby-weather",
+          name: "get-current-weather",
           arguments: { city: cityName },
         });
 
         const data = result.structuredContent;
         if (hasWeatherError(data)) {
           setError(data.error.message);
-          setIsLoading(false);
-          return;
-        }
-
-        if (hasNearbyWeather(data)) {
-          applyNearbyResult(data.nearby);
-
-          // Tell the AI the context changed
-          await app
-            .updateModelContext({
-              content: [
-                {
-                  type: "text",
-                  text: `User is now viewing nearby weather around ${cityName}.`,
-                },
-              ],
-            })
-            .catch(() => {});
+        } else if (hasCurrentWeather(data)) {
+          setSelectedCity(data.current);
         }
       } catch {
-        // Non-critical
+        setError("Failed to load city weather. Please try again.");
       } finally {
         setRefreshingCity(null);
+        setIsLoadingSelected(false);
       }
     },
-    [app, applyNearbyResult, refreshingCity],
+    [app, refreshingCity],
   );
 
   // --- Render guards ---
@@ -127,6 +127,19 @@ export function NearbyApp() {
 
   const data = nearby!;
 
+  // --- Selected city detail view ---
+
+  if (selectedCity) {
+    return (
+      <main style={styles.container}>
+        <button style={styles.backButton} onClick={() => setSelectedCity(null)}>
+          ← Back
+        </button>
+        <CurrentConditions current={selectedCity} isRefreshing={isLoadingSelected} />
+      </main>
+    );
+  }
+
   // --- Main render ---
 
   return (
@@ -142,7 +155,7 @@ export function NearbyApp() {
           />
         ))}
       </div>
-      <p style={styles.hint}>Select a city to see its nearby weather</p>
+      <p style={styles.hint}>Select a city to see its current conditions</p>
     </main>
   );
 }
@@ -265,5 +278,15 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "var(--font-size-xs)" as string,
     color: "var(--color-text-secondary)" as string,
     opacity: 0.6,
+  },
+  backButton: {
+    alignSelf: "flex-start",
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    fontSize: "var(--font-size-base)" as string,
+    color: "var(--color-text-secondary)" as string,
+    padding: "var(--spacing-xs) 0" as string,
+    fontFamily: "inherit",
   },
 };
